@@ -31,6 +31,7 @@ module "vpc" {
 
   enable_nat_gateway = true
   single_nat_gateway = true
+  one_nat_gateway_per_az = false
 
   # These subnet tags tell EKS and AWS Load Balancers which subnets can be used
   # for creating public and internal load balancers (for Services/Ingress).
