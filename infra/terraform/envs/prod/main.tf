@@ -64,21 +64,21 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  cluster_name    = var.cluster_name
-  cluster_version = var.k8s_version
+  name       = var.cluster_name
+  kubernetes_version = var.k8s_version
 
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets
   control_plane_subnet_ids = module.vpc.private_subnets
 
-  cluster_endpoint_public_access       = true
-  cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
+  endpoint_public_access       = true
+  endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
   authentication_mode = "API_AND_CONFIG_MAP"
 
-  cluster_enabled_log_types = [ "audit" ]
+  enabled_log_types = [ "audit" ]
 
-  cluster_encryption_config = {
+  encryption_config = {
     resources = ["secrets"]
     provider_key_arn = aws_kms_key.eks_secrets.arn
   }
@@ -115,9 +115,9 @@ module "eks" {
 
   enable_irsa = true
 
-  cluster_addons = {
+  addons = {
     aws-ebs-csi-driver = {
-      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
+      service_account_role_arn = module.ebs_csi_irsa_role.arn
     }
   }
 
@@ -142,7 +142,7 @@ module "ebs_csi_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "~> 6.3"
 
-  role_name_prefix      = "${var.cluster_name}-ebs-csi"
+  name                  = "${var.cluster_name}-ebs-csi"
   attach_ebs_csi_policy = true
 
   oidc_providers = {
