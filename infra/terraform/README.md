@@ -82,7 +82,7 @@ ECR is configured with `IMMUTABLE`. This means a tag (including `latest`) **cann
 Run Terraform **without backend** on the first run. This creates the S3 bucket while keeping the state locally just for this initial creation step.
 
 ```bash
-cd terraform/bootstrap
+cd infra/terraform/bootstrap
 
 terraform init -backend=false
 terraform fmt -check
@@ -107,7 +107,7 @@ terraform apply
 Now initialize again using the existing `backend.hcl` and migrate the local bootstrap state into S3.
 
 ```bash
-cd terraform/bootstrap
+cd infra/terraform/bootstrap
 
 terraform init -backend-config=backend.hcl -migrate-state
 terraform plan
@@ -123,7 +123,7 @@ terraform plan
 Move to the prod environment and initialize Terraform using the existing `backend.hcl`. Then run plan/apply normally.
 
 ```bash
-cd terraform/envs/prod
+cd infra/terraform/envs/prod
 
 terraform init -backend-config=backend.hcl
 terraform fmt -check
@@ -235,7 +235,7 @@ aws ecr describe-repositories --repository-names counter-service --region eu-wes
 
 To destroy prod infrastructure:
 ```bash
-cd terraform/envs/prod
+cd infra/terraform/envs/prod
 terraform destroy
 ```
 
