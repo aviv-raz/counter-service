@@ -84,10 +84,9 @@ Run Terraform **without backend** on the first run. This creates the S3 bucket w
 ```bash
 cd infra/terraform/bootstrap
 
-terraform init -backend=false
+terraform init
 terraform fmt -check
 terraform validate
-
 terraform plan
 terraform apply
 ```
@@ -102,9 +101,27 @@ terraform apply
 
 ---
 
-## Step 2: Migrate Bootstrap State to S3
+## Step 2: Enable S3 Backend for State Migration
 
-Now initialize again using the existing `backend.hcl` and migrate the local bootstrap state into S3.
+Before running the commands below, you must enable the S3 backend in the Terraform configuration.
+
+1. Open the Terraform file where the backend is defined  
+   (for example: `infra/terraform/bootstrap/backend.tf`).
+
+2. Make sure the following block exists in that file:
+
+```hcl
+terraform {
+  backend "s3" {}
+}
+
+This step is required so Terraform knows to use the S3 backend and can migrate the local state.
+
+---
+
+## Step 3: Migrate Bootstrap State to S3
+
+After saving the file, initialize Terraform again using the existing backend.hcl and migrate the local bootstrap state into S3:
 
 ```bash
 cd infra/terraform/bootstrap
@@ -118,7 +135,7 @@ terraform plan
 
 ---
 
-## Step 3: Initialize and Apply Prod Environment (Remote State)
+## Step 4: Initialize and Apply Prod Environment (Remote State)
 
 Move to the prod environment and initialize Terraform using the existing `backend.hcl`. Then run plan/apply normally.
 
