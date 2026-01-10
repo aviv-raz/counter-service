@@ -108,12 +108,10 @@ Before running the commands below, you must enable the S3 backend in the Terrafo
 1. Open the Terraform file where the backend is defined  
    (for example: `infra/terraform/bootstrap/backend.tf`).
 
-2. Make sure the following block exists in that file:
+2. Make sure the following line exists in that file under **terraform** block:
 
 ```hcl
-terraform {
   backend "s3" {}
-}
 ```
 
 This step is required so Terraform knows to use the S3 backend and can migrate the local state.
