@@ -100,8 +100,8 @@ terraform apply
 
 Before running the commands below, you must enable the S3 backend in the Terraform configuration.
 
-1. Open the Terraform file where the backend is defined  
-   (for example: `infra/terraform/bootstrap/backend.tf`).
+1. Open the Terraform file where the terraform versions is defined  
+   (for example: `infra/terraform/bootstrap/versions.tf`).
 
 2. Make sure the following line exists in that file under **terraform** block:
 
