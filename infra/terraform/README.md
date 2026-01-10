@@ -13,7 +13,6 @@ This repository demonstrates a production-style Terraform workflow on AWS using 
 - **State locking** using S3 lockfile (`use_lockfile = true`)
 - A clean **bootstrap pattern** (backend infra managed separately from app/prod infra)
 - Secure-by-default foundations:
-  - S3 public access blocked
   - S3 server-side encryption enabled
   - ECR image scanning on push + immutable tags
 - **OIDC-based auth for GitHub Actions** (no long‑lived AWS credentials in CI)
@@ -65,9 +64,6 @@ terraform/
 
 ## Important notes
 
-### Remote state and “not public” S3 buckets
-The state bucket is **not public**, but Terraform can still access it because it uses your AWS credentials (IAM user/role) over AWS APIs. “Not public” only blocks anonymous/public access.
-
 ### Encryption
 - Backend `encrypt = true` requests **SSE-S3** (server-side encryption) for the state object.
 - The bucket also enforces default server-side encryption (defense-in-depth).
@@ -95,7 +91,6 @@ terraform apply
 - S3 bucket for Terraform state (`aws_s3_bucket`)
 - Versioning enabled (`aws_s3_bucket_versioning`)
 - Server-side encryption enabled (`aws_s3_bucket_server_side_encryption_configuration`)
-- Public access blocked (`aws_s3_bucket_public_access_block`)
 - `prevent_destroy = true` to avoid accidental deletion of the state bucket
 - Bootstrap state is local (temporary)
 
