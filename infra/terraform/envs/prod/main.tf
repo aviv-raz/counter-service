@@ -93,6 +93,8 @@ module "eks" {
     ng1 = {
       name = "${var.cluster_name}-ng1"
 
+      kubernetes_version = var.k8s_version
+
       instance_types = var.node_instance_types
       capacity_type  = "ON_DEMAND"
 
@@ -145,6 +147,8 @@ module "ebs_csi_irsa_role" {
 
   name                  = "${var.cluster_name}-ebs-csi"
   attach_ebs_csi_policy = true
+
+  create_policy = false
 
   oidc_providers = {
     main = {

@@ -11,7 +11,7 @@ variable "cluster_name" {
 variable "k8s_version" {
   description = "Kubernetes version for the EKS cluster"
   type        = string
-  default     = "1.29"
+  default     = "1.34"
 }
 
 variable "github_owner" {
