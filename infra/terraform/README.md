@@ -81,7 +81,7 @@ Run Terraform **without backend** on the first run. This creates the S3 bucket w
 cd infra/terraform/bootstrap
 
 terraform init
-terraform fmt -check
+terraform fmt
 terraform validate
 terraform plan
 terraform apply
@@ -139,7 +139,7 @@ Move to the prod environment and initialize Terraform using the existing `backen
 cd infra/terraform/envs/prod
 
 terraform init -backend-config=backend.hcl
-terraform fmt -check
+terraform fmt
 terraform validate
 
 terraform plan -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
