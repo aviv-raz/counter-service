@@ -122,6 +122,8 @@ cd infra/terraform/bootstrap
 
 terraform init -backend-config=backend.hcl -migrate-state
 terraform plan
+
+rm terraform.tfstate terraform.tfstate.backup
 ```
 
 ### Key bootstrap resources
