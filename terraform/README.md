@@ -102,7 +102,7 @@ terraform apply
 
 ---
 
-## Step 2: Migrate Bootstrap State to S3 (Remote State)
+## Step 2: Migrate Bootstrap State to S3
 
 Now initialize again using the existing `backend.hcl` and migrate the local bootstrap state into S3.
 
