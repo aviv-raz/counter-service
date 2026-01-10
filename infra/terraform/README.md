@@ -114,6 +114,7 @@ Before running the commands below, you must enable the S3 backend in the Terrafo
 terraform {
   backend "s3" {}
 }
+```
 
 This step is required so Terraform knows to use the S3 backend and can migrate the local state.
 
