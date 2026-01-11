@@ -35,6 +35,12 @@ variable "cluster_endpoint_public_access_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "node_ami_type" {
+  description = "EC2 ami type for the worker nodes."
+  type        = string
+  default     = "AL2023_x86_64_STANDARD"
+}
+
 variable "node_instance_types" {
   description = "EC2 instance types for the worker nodes."
   type        = list(string)
