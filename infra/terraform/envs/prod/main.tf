@@ -68,6 +68,8 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
+  depends_on = [module.ebs_csi_irsa_role]
+
   name       = var.cluster_name
   kubernetes_version = var.k8s_version
 
