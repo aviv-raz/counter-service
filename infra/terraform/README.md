@@ -142,8 +142,11 @@ terraform init -backend-config=backend.hcl
 terraform fmt
 terraform validate
 
-terraform plan -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
-terraform apply -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
+terraform plan -var="enable_ebs_csi=false" -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
+terraform apply -var="enable_ebs_csi=false"-var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
+
+terraform plan -var="enable_ebs_csi=true" -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
+terraform apply -var="enable_ebs_csi=true" -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
 ```
 
 ### What gets provisioned in `prod`
@@ -249,7 +252,15 @@ aws ecr describe-repositories --repository-names counter-service --region eu-wes
 To destroy prod infrastructure:
 ```bash
 cd infra/terraform/envs/prod
-terraform destroy
+
+helm unintall <Your Application Name>
+kubectl delete namespace <Namespace Of Your Application>
+
+#Check if any pv/pvc are exists by ruuning the following commands (Please remove them):
+kubectl get pvc -A
+kubectl get pv
+
+terraform destroy -var="github_owner=YOUR_GH_OWNER" -var="github_repo=YOUR_REPO"
 ```
 
 Bootstrap (state bucket) is protected with `prevent_destroy = true` by design.
