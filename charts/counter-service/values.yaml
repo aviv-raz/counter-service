@@ -1,7 +1,0 @@
----
-persistence:
-  enabled: true
-  storageClassName: gp3-encrypted
-  size: 5Gi
-  mountPath: /data
-
