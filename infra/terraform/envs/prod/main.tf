@@ -1,3 +1,4 @@
+data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" {
   state = "available"
@@ -27,20 +28,22 @@ module "vpc" {
 
   azs = local.azs
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
-  public_subnets = ["10.0.101.0/24", "10.0.102.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  enable_nat_gateway     = true
+  single_nat_gateway     = true
   one_nat_gateway_per_az = false
 
   # These subnet tags tell EKS and AWS Load Balancers which subnets can be used
   # for creating public and internal load balancers (for Services/Ingress).
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
 
@@ -72,6 +75,7 @@ module "eks" {
   subnet_ids               = module.vpc.private_subnets
   control_plane_subnet_ids = module.vpc.private_subnets
 
+  endpoint_private_access      = true
   endpoint_public_access       = true
   endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
@@ -95,8 +99,19 @@ module "eks" {
 
       kubernetes_version = var.k8s_version
 
+      ami_type       = var.node_ami_type
       instance_types = var.node_instance_types
       capacity_type  = "ON_DEMAND"
+
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"
+        http_put_response_hop_limit = 2
+      }
+
+      iam_role_additional_policies = {
+        ssm = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      }
 
       min_size     = 1
       max_size     = 2
@@ -116,22 +131,53 @@ module "eks" {
     }
   }
 
-  enable_irsa = true
+  addons_timeouts = {
+    create = "25m"
+    update = "25m"
+    delete = "25m"
+  }
 
   addons = {
+    vpc-cni = {
+      most_recent = true
+    }
+
+    kube-proxy = {
+      most_recent = true
+    }
+
+    coredns = {
+      most_recent = true
+    }
+
     aws-ebs-csi-driver = {
       service_account_role_arn = module.ebs_csi_irsa_role.arn
+      most_recent = true
     }
   }
 
+  enable_irsa = true
+
   access_entries = {
+    aviv_user = {
+      principal_arn = data.aws_caller_identity.current.arn
+
+      policy_associations = {
+        admin = {
+          policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope  = { type = "cluster" }
+        }
+      }
+    }
+
+    # GitHub Actions
     gha = {
       principal_arn = aws_iam_role.gha_deployer.arn
 
       policy_associations = {
         admin = {
-          policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
+          policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope  = { type = "cluster" }
         }
       }
     }
