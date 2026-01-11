@@ -47,6 +47,12 @@ variable "node_instance_types" {
   default     = ["t3.medium"]
 }
 
+variable "enable_ebs_csi" {
+  description = "Install aws-ebs-csi-driver addon + IRSA role"
+  type        = bool
+  default     = false
+}
+
 variable "common_tags" {
   description = "Tags applied to resources that support tags"
   type        = map(string)

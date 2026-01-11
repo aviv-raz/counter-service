@@ -14,6 +14,19 @@ locals {
   gha_role_name = "${var.cluster_name}-gha-deployer"
 
   gha_sub = "repo:${var.github_owner}/${var.github_repo}:environment:${var.github_environment}"
+
+  base_addons = {
+    vpc-cni    = { most_recent = true }
+    kube-proxy = { most_recent = true }
+    coredns    = { most_recent = true }
+  }
+
+  ebs_addon = var.enable_ebs_csi ? {
+    aws-ebs-csi-driver = {
+      most_recent              = true
+      service_account_role_arn = module.ebs_csi_irsa_role[0].arn
+    }
+  } : {}
 }
 
 ############################
@@ -26,7 +39,7 @@ module "vpc" {
   name = local.vpc_name
   cidr = "10.0.0.0/16"
 
-  azs = local.azs
+  azs             = local.azs
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
 
@@ -37,12 +50,12 @@ module "vpc" {
   # These subnet tags tell EKS and AWS Load Balancers which subnets can be used
   # for creating public and internal load balancers (for Services/Ingress).
   public_subnet_tags = {
-    "kubernetes.io/role/elb" = "1"
+    "kubernetes.io/role/elb"                    = "1"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 
   private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/role/internal-elb"           = "1"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
@@ -68,9 +81,7 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  depends_on = [module.ebs_csi_irsa_role]
-
-  name       = var.cluster_name
+  name               = var.cluster_name
   kubernetes_version = var.k8s_version
 
   vpc_id                   = module.vpc.vpc_id
@@ -83,10 +94,10 @@ module "eks" {
 
   authentication_mode = "API_AND_CONFIG_MAP"
 
-  enabled_log_types = [ "audit" ]
+  enabled_log_types = ["audit"]
 
   encryption_config = {
-    resources = ["secrets"]
+    resources        = ["secrets"]
     provider_key_arn = aws_kms_key.eks_secrets.arn
   }
 
@@ -139,24 +150,7 @@ module "eks" {
     delete = "25m"
   }
 
-  addons = {
-    vpc-cni = {
-      most_recent = true
-    }
-
-    kube-proxy = {
-      most_recent = true
-    }
-
-    coredns = {
-      most_recent = true
-    }
-
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.ebs_csi_irsa_role.arn
-      most_recent = true
-    }
-  }
+  addons = merge(local.base_addons, local.ebs_addon)
 
   enable_irsa = true
 
@@ -166,8 +160,8 @@ module "eks" {
 
       policy_associations = {
         admin = {
-          policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope  = { type = "cluster" }
+          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
         }
       }
     }
@@ -178,8 +172,8 @@ module "eks" {
 
       policy_associations = {
         admin = {
-          policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope  = { type = "cluster" }
+          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
         }
       }
     }
@@ -190,13 +184,13 @@ module "eks" {
 # IRSA - IAM role for SA of ebs csi
 ############################
 module "ebs_csi_irsa_role" {
+  count = var.enable_ebs_csi ? 1 : 0
+
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "~> 6.3"
 
   name                  = "${var.cluster_name}-ebs-csi"
   attach_ebs_csi_policy = true
-
-  create_policy = false
 
   oidc_providers = {
     main = {
@@ -245,8 +239,8 @@ resource "aws_ecr_lifecycle_policy" "counter" {
 # OIDC provider for GitHub Actions
 ############################
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
 
   thumbprint_list = [
     "6938fd4d98bab03faadb97b34396831e3780aea1",
@@ -290,9 +284,9 @@ resource "aws_iam_role" "gha_deployer" {
 ############################
 data "aws_iam_policy_document" "gha_permissions" {
   statement {
-    sid     = "ECRAuth"
-    effect  = "Allow"
-    actions = ["ecr:GetAuthorizationToken"]
+    sid       = "ECRAuth"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
 
@@ -315,9 +309,9 @@ data "aws_iam_policy_document" "gha_permissions" {
   }
 
   statement {
-    sid     = "EKSDescribe"
-    effect  = "Allow"
-    actions = ["eks:DescribeCluster"]
+    sid       = "EKSDescribe"
+    effect    = "Allow"
+    actions   = ["eks:DescribeCluster"]
     resources = [module.eks.cluster_arn]
   }
 }
