@@ -1,169 +1,221 @@
-# Storage, Scaling, and Concurrency Design Notes (EKS)
+# Counter Service on AWS EKS (Terraform + Helm + GitHub Actions)
 
-This document explains the trade-offs behind my storage and scaling choices for the **counter-service** application, and what would be required to safely scale it further.
+This repository implements a lightweight Python-based **counter service** that increments on **POST** requests and returns the current count on **GET** requests.
 
----
-
-## Background: how the service persists state
-
-The service stores its counter in a JSON file (default: `/data/counter.json`).  
-To prevent corrupted writes, the application uses **exclusive file locking** and an **atomic write pattern**:
-
-- A dedicated lock file (`counter.lock`) is used to acquire an exclusive lock.
-- The counter is written to a temporary file and then atomically replaced (`tmp -> replace`).
-
-This approach ensures that even when multiple requests hit the service concurrently (e.g., threads inside the same process), only one writer updates the counter at a time, and readers never see a partially-written file.
+It is containerized with Docker, deployed to **Amazon EKS** (region **eu-west-2**) using **Helm**, and delivered via a fully automated **GitHub Actions** CI/CD pipeline using **OIDC** (no long‑lived AWS credentials in CI).
 
 ---
 
-## Why I chose EBS CSI (and what it solves)
+## Prerequisites
 
-I installed **EBS CSI Driver** and used an **EBS-backed PVC** for simplicity and operational convenience in EKS.
-
-### What this choice solves
-- **Simple persistence model**: the counter file is persisted via a standard Kubernetes PVC.
-- **Easy provisioning**: a StorageClass can dynamically provision EBS volumes (e.g., gp3).
-- **Good for single-writer patterns**: EBS is ideal when the workload is effectively single-node / single-writer.
-
-### The key limitation
-EBS volumes are typically mounted in Kubernetes as **ReadWriteOnce (RWO)**, which effectively means:
-
-- The volume can be mounted read-write by **one node at a time**.
-- In practice, this strongly pushes the workload to **a single replica** (or multiple pods only if they are forced onto the same node, which is not a robust HA pattern).
-
-✅ **Result:** With EBS CSI, I run **1 replica** of the application to guarantee consistent, safe access to the persistent counter file.
+Local tools:
+- **AWS CLI** (for provisioning/verification and kubeconfig)
+- **Terraform** `>= 1.10, < 2.0`
+- **kubectl**
+- **Helm**
+- **Docker**
 
 ---
 
-## When this design will NOT work (and why)
+## Credentials and secrets (safe setup)
 
-### 1) Multiple replicas (multi pods) that share the same storage
-If I scale the Deployment to multiple replicas while using EBS (RWO):
+### Local development (your machine)
+Configure AWS CLI using your IAM user (or a role you can assume):
 
-- Pods may be scheduled on different nodes.
-- The same volume cannot be mounted read-write across nodes concurrently.
-- The second pod will typically fail to mount (or the scheduler will prevent placement), so the scale-out won’t behave as intended.
+```bash
+aws configure
+aws sts get-caller-identity
+```
 
-✅ **Conclusion:** With **EBS CSI**, safe persistence via a single shared file strongly implies **replicas = 1**.
+> Do **not** commit any credentials to Git.
 
----
+### CI/CD (GitHub Actions)
+CI/CD uses **GitHub OIDC → AWS STS AssumeRoleWithWebIdentity**, which provides **temporary credentials** at runtime. No static AWS keys are stored in GitHub.
 
-## What I would change to support multiple replicas without changing application code
-
-### Option A — Switch storage to EFS CSI (RWX)
-To allow **multiple pods on multiple nodes** to mount the same shared filesystem, the storage must support **ReadWriteMany (RWX)**.
-
-- EFS CSI provides an NFS-based shared filesystem (RWX).
-- All replicas can mount `/data` simultaneously.
-- The Python code does **not** need to change, because it already implements file locking and atomic writes.
-
-✅ This is the most direct path to “multi replicas + shared file” while keeping the current persistence approach.
-
-### Option B — Move state to an external data store (recommended for real scale)
-Another common approach is to remove file-based state entirely and use a strongly-consistent store with atomic operations, e.g.:
-
-- DynamoDB (atomic UpdateItem / conditional writes)
-- Redis (INCR)
-- RDS with transactions
-
-✅ This also avoids shared filesystem concerns and usually scales better than file-based state.
+Recommended GitHub repository settings:
+- Use a **GitHub Environment** named `prod` with optional manual approvals (for CD gating).
+- Store non-secret configuration as **Actions Variables** (cluster name, release name, etc.).
+- If you ever need secrets (e.g., AWS_ROLE_ARN), store them as **Actions Secrets**.
 
 ---
 
-## Replicas vs Workers: locking and metrics trade-offs
+## Provision the cluster (high level)
 
-There are two independent scaling axes:
+Infrastructure is provisioned using a **two-phase Terraform pattern**:
+1. **bootstrap**: creates the Terraform backend (S3 remote state + locking)
+2. **prod**: creates VPC + EKS + ECR + OIDC/IRSA (including EBS CSI driver)
 
-1) **Replicas (Pods)**: horizontal scaling at the Kubernetes level  
-2) **Workers/Threads inside a Pod**: concurrency within a single Pod (Gunicorn workers, threads)
+For the full details and exact steps, see: `infra/terraform/README.md`.
 
-Below are the key implications for **file locking** and **Prometheus metrics**.
+### Required EKS setting (important)
+The EKS cluster must use **Upgrade Policy: STANDARD** (not EXTENDED).
 
----
+Verify:
+```bash
+aws eks describe-cluster --region <AWS_REGION> --name <CLUSTER_NAME> --query "cluster.upgradePolicy" --output json
+```
 
-## Multi pods (multiple replicas)
+### Post-provision step: encrypted StorageClass (required for PVCs)
+After the cluster is up and reachable, apply the encrypted gp3 StorageClass:
 
-### File locking
-If I choose **multi pods** and they share the same file, I need a locking mechanism that is safe **across pods/nodes**:
-
-- With **EBS CSI**, this is blocked by RWO (single-node attachment), so multi pods sharing the same PV is not a viable design.
-- With **EFS CSI**, shared RWX is possible. File locks can work across clients, and my code already implements locking + atomic replace.
-
-If I choose **multi pods** without shared filesystem and I still want a single global counter, then I must move state into a distributed store (DynamoDB/Redis/etc.).
-
-**Summary (multi pods):**
-- EBS: ❌ not suitable for shared file across pods (RWO)
-- EFS: ✅ suitable (RWX), code can stay the same
-- External DB: ✅ suitable, best long-term scalability
-
-### Metrics
-If I choose **multi pods**, metrics are naturally fine:
-
-- Prometheus scrapes each pod endpoint independently.
-- Each pod exposes its own counters/histograms.
-- Aggregation happens at query-time in PromQL (sum/rate/etc.).
-
-✅ **Conclusion:** multi pods = **metrics are straightforward**.
+```bash
+kubectl apply -f infra/k8s/storageclass_gp3_encrypted.yaml
+kubectl get storageclass
+```
 
 ---
 
-## Multi workers (multiple processes inside the same Pod)
+## Verification checklist (before running CI/CD)
 
-### File locking
-If I choose **multi workers** (e.g., Gunicorn `workers>1`), multiple processes may access the same file:
+These are the key checks used while bringing the cluster up:
 
-- On Linux, file locking can coordinate access across processes.
-- The code uses file locking, so it protects the counter file from concurrent writers.
+```bash
+# cluster readiness + required policy
+aws eks describe-cluster --region <AWS_REGION> --name <CLUSTER_NAME> --query "cluster.status" --output text
+aws eks describe-cluster --region <AWS_REGION> --name <CLUSTER_NAME> --query "cluster.upgradePolicy" --output json
 
-✅ **Conclusion:** multi workers = file locking can be fine (assuming all workers mount the same path).
+# add-ons
+aws eks list-addons --cluster-name <CLUSTER_NAME> --output table
 
-### Metrics
-This is where it gets tricky.
+# kube access
+aws eks update-kubeconfig --region <AWS_REGION> --name <CLUSTER_NAME>
+kubectl get nodes
+kubectl get pods -n kube-system
 
-Prometheus Python client libraries typically do **not** aggregate metrics across multiple worker processes “out of the box” in a single, clean way.
+# EBS CSI / IRSA
+kubectl get sa -n kube-system | grep -i ebs
+kubectl get sa -n kube-system ebs-csi-controller-sa -o jsonpath="{.metadata.annotations.eks\.amazonaws\.com/role-arn}"
 
-Common solutions include:
-- Using a multi-process mode (requires special setup and filesystem directory for metrics state)
-- Pushgateway (push model instead of scrape model)
-- Running a single worker per pod and scaling via replicas instead
-
-❗ **Conclusion:** multi workers can require additional work for correct metrics aggregation.
-
----
-
-## My final runtime choice (and why)
-
-### Pods / replicas
-- ✅ I chose **1 replica** because I use **EBS CSI (RWO)** and persist state in a single file.
-- This guarantees stable persistence semantics and avoids cross-node shared storage requirements.
-
-### Workers / threads
-- ✅ I chose **a single worker process** (no multi-worker processes) because I do not currently implement metrics aggregation across workers.
-- ✅ I do use **threads=4**, and the file-locking mechanism supports concurrent requests safely by serializing writes.
-
-**Why threads=4 is acceptable here**
-- Threads share the same process memory space.
-- The app-level file lock ensures only one writer updates the file at a time.
-- Prometheus metrics remain consistent because there is a single process exporting them.
+# encrypted StorageClass for dynamic EBS provisioning
+kubectl get storageclass
+```
 
 ---
 
-## Summary of trade-offs
+## CI/CD pipeline
 
-### Current design (what I implemented)
-- Storage: **EBS CSI (RWO)**
-- Replicas: **1**
-- Worker model: **single worker process**
-- Concurrency: **threads=4**
-- Pros:
-  - Simple operational model
-  - Safe persistence with a single-writer pattern
-  - Metrics are simple and accurate
-- Cons:
-  - No horizontal scaling via multiple replicas (unless storage/state approach changes)
+Workflows live under `.github/workflows/`:
+- **CI** (`ci.yml`): lint/tests + Docker build + image scan
+- **CD** (`cd.yml`): on push to `main`, builds & pushes image to **ECR**, then deploys to EKS using **Helm**
 
-### To support multiple replicas (recommended path)
-- Switch to **EFS CSI (RWX)** for shared file storage **or**
-- Move state to **DynamoDB/Redis** for a proper distributed counter
+### How to run the pipeline
+- Open a PR → CI runs automatically.
+- Merge/push to `main` → CD runs automatically and upgrades the live service in the `prod` namespace.
 
-In both cases, the **Python locking/atomic write code does not need to change**, because it already follows safe update semantics. The main change is the storage/state backend to support horizontal scaling.
+---
+
+## Deployment (manual)
+
+The automated CD runs the equivalent of the following Helm command (example):
+
+```bash
+ECR="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/counter-service"
+TAG="1.0.1"
+
+helm upgrade --install counter-service helm_charts/counter-service --create-namespace -n prod --set image.repository=${ECR} --set image.tag=${TAG} --set env.APP_VERSION=${TAG} -f helm_charts/counter-service/values-prod.yaml
+```
+
+---
+
+## How to deploy and test
+
+### Get the external endpoint
+```bash
+kubectl get svc -n prod
+```
+
+For a `LoadBalancer` Service, use the EXTERNAL-IP/hostname to form the base URL:
+```bash
+BASE_URL="http://<external-hostname>"
+```
+
+### API checks
+```bash
+# current counter
+curl "$BASE_URL/"
+
+# increment
+curl -X POST "$BASE_URL/"
+
+# health (used by readiness/liveness probes)
+curl "$BASE_URL/healthz"
+
+# version (used to prove CD updates)
+curl "$BASE_URL/version"
+```
+
+### Persistence check (counter survives restarts)
+```bash
+# increment a few times
+curl -X POST "$BASE_URL/"
+curl -X POST "$BASE_URL/"
+
+# restart the Deployment
+kubectl rollout restart deploy/counter-service -n prod
+kubectl rollout status deploy/counter-service -n prod
+
+# verify counter is preserved
+curl "$BASE_URL/"
+```
+
+---
+
+## Notes on HA, scaling, persistence choices, and trade-offs
+
+### Persistence model
+The counter is stored in a JSON file (default `/data/counter.json`) on a PVC.
+To prevent corrupted writes, the application uses an **exclusive file lock** and an **atomic write** pattern (write temp → replace).
+
+### Why replicas = 1
+This deployment uses **EBS CSI** volumes, which are typically **ReadWriteOnce (RWO)**. That means the volume can be attached read-write to **one node at a time**, which strongly implies running a **single replica** when persisting state to a shared file.
+
+### How to scale horizontally (without changing app code)
+Two practical options:
+- **EFS CSI (RWX)**: shared filesystem across nodes; multiple pods can mount `/data` concurrently.
+- **External state store**: DynamoDB/Redis/RDS (atomic operations / transactions) for a proper distributed counter.
+
+### Metrics and concurrency (quick note)
+- With **multiple pods**, Prometheus scraping and aggregation is straightforward.
+- With **multiple worker processes** inside a single pod (Gunicorn `workers>1`), Prometheus multiprocess metrics typically require extra setup.
+
+---
+
+## Observability & security (baseline)
+
+- **Probes**: `/healthz` readiness/liveness endpoints for stable rollouts.
+- **Version endpoint**: `/version` returns the build tag/commit SHA to prove CD updates.
+- **Container security**: runs as **non-root** and uses **readOnlyRootFilesystem** (with `/data` mounted from a PVC).
+- **Resource requests/limits**: defined in the Helm values.
+- **Image scanning**: ECR scanning on push + CI image scan (Trivy).
+- **Encryption**:
+  - Terraform remote state stored in S3 with encryption enabled
+  - EKS secrets encryption (KMS) and encrypted storage via StorageClass
+
+---
+
+## Rollback strategy
+
+Helm keeps release history, so rollbacks are straightforward:
+
+```bash
+helm history counter-service -n prod
+helm rollback counter-service <REVISION> -n prod
+```
+
+---
+
+## Evidence for submission
+
+Place screenshots and/or captured CLI outputs under `evidence/`, for example:
+- CI build + scan success
+- CD deployment on push to `main`
+- `kubectl get deploy,po,svc,pvc -n prod`
+- Service responding correctly (GET/POST + counter) and `/version` updated after a commit
+
+---
+
+## Additional documentation
+
+- Terraform deep dive: `infra/terraform/README.md`
+- Application notes: `app/README.md`
+- Extended design notes / trade-offs: `docs/design-notes.md`
