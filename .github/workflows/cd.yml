@@ -1,0 +1,70 @@
+name: CD
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE_REPO="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+          IMAGE_TAG="${GITHUB_SHA}"
+
+          docker build -t "${IMAGE_REPO}:${IMAGE_TAG}" .
+          docker push "${IMAGE_REPO}:${IMAGE_TAG}"
+
+          echo "IMAGE_REPO=${IMAGE_REPO}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region "${{ secrets.AWS_REGION }}" --name "${{ vars.EKS_CLUSTER_NAME }}"
+          kubectl get nodes
+
+      - name: Helm upgrade/install to prod
+        run: |
+          kubectl create namespace "${{ vars.HELM_NAMESPACE }}" --dry-run=client -o yaml | kubectl apply -f -
+
+          helm upgrade --install "${{ vars.HELM_RELEASE }}" "${{ vars.HELM_CHART_PATH }}" \
+            --create-namespace \
+            -n "${{ vars.HELM_NAMESPACE }}" \
+            --set image.repository="${IMAGE_REPO}" \
+            --set image.tag="${IMAGE_TAG}" \
+            --set env.APP_VERSION="${IMAGE_TAG}" \
+            -f "${{ vars.HELM_VALUES_PROD }}"
+
+          kubectl rollout status deploy/"${{ vars.HELM_RELEASE }}" -n "${{ vars.HELM_NAMESPACE }}" --timeout=180s
+          kubectl get svc -n "${{ vars.HELM_NAMESPACE }}"
