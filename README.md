@@ -1,3 +1,4 @@
+
 # Storage, Scaling, and Concurrency Design Notes (EKS)
 
 This document explains the trade-offs behind my storage and scaling choices for the **counter-service** application, and what would be required to safely scale it further.
