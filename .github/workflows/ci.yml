@@ -37,6 +37,7 @@ jobs:
       - name: Unit tests (pytest)
         working-directory: app/code
         run: |
+          export PYTHONPATH=$(pwd)
           pytest -q
 
       - name: Docker build (no push)
