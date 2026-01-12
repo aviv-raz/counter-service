@@ -1,0 +1,4 @@
+app/code/tests
+__pycache__/
+*.pyc
+.git

@@ -1,0 +1,49 @@
+# Default values for counter-service.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  automountToken: false
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+podSecurityContext:
+  fsGroup: 10001
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080
+
+env:
+  COUNTER_FILE: /data/counter.json
+  LOG_LEVEL: INFO
+  APP_VERSION: dev
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  storageClassName: gp3-encrypted
+  mountPath: /data
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
