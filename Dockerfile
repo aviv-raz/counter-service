@@ -18,7 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/code/ .
 
 # Writable directory for persistence (PVC will mount here)
-RUN mkdir -p /data && chown -R appuser:appuser /data
+RUN mkdir -p /data /tmp && \
+    chown -R appuser:appuser /data && \
+    chmod 1777 /tmp
 
 USER appuser
 
