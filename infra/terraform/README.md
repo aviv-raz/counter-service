@@ -253,10 +253,11 @@ To destroy prod infrastructure:
 ```bash
 cd infra/terraform/envs/prod
 
-helm unintall <Your Application Name>
-kubectl delete namespace <Namespace Of Your Application>
+#Check if any helm releases are exists by running the following commands (Please remove them):
+helm ls -A
+helm unintall -n <Application Namespace> <Application Name>
 
-#Check if any pv/pvc are exists by ruuning the following commands (Please remove them):
+#Check if any pv/pvc are exists by running the following commands (Please remove them):
 kubectl get pvc -A
 kubectl get pv
 
@@ -275,4 +276,3 @@ This project is intentionally structured to resemble real-world IaC practices:
 - clear separation between Terraform backend (bootstrap) and production infrastructure (prod)
 - security-first defaults
 - CI-friendly auth (OIDC) and K8s-to-AWS auth (IRSA)
-
